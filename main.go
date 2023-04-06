@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"crypto/sha1"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -28,13 +29,21 @@ func main() {
 		}
 		fmt.Println("Initialized empty Git repository in .ggit/")
 	case "status":
-		Status()
+		err := Status()
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
 	case "add":
 		if len(os.Args) < 3 {
 			fmt.Println("Usage: ggit add <filename>")
 			os.Exit(1)
 		}
-		Add(os.Args[2:])
+		err := Add(os.Args[2:])
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
 	case "log":
 		fmt.Println("Not implemented yet")
 	case "commit":
@@ -53,10 +62,16 @@ func Sha1Hash(t string, input string) string {
 }
 
 func InitRepo() error {
-	dotDir, err := os.Getwd()
-	// Check if .ggit folder already exists
+	currentDir, err := os.Getwd()
 	if err != nil {
-		return fmt.Errorf(".ggit folder already exists")
+		return fmt.Errorf("error in get working directory")
+	}
+
+	// Check if .ggit folder already exists
+	dotDir := joinPath(currentDir, ".ggit")
+	if fileExists(dotDir) {
+		fmt.Printf("Reinitialized existing Git repository in %s\n", dotDir)
+		return nil
 	}
 
 	// Create .ggit folder
@@ -99,18 +114,22 @@ func InitRepo() error {
 	return nil
 }
 
-func Status() {
-	branch := getCurrentBranchName()
+func Status() error {
+	branch, err := getCurrentBranchName()
+	if err != nil {
+		return err
+	}
 	fmt.Printf("On branch %s\n", branch)
 	fmt.Println()
 	fmt.Printf("No commits yet")
 	fmt.Println()
+	return nil
 }
 
-func getCurrentBranchName() string {
+func getCurrentBranchName() (string, error) {
 	headFile, err := os.Open(joinPath(dotDir, "HEAD"))
 	if err != nil {
-		return ""
+		return "", err
 	}
 	defer headFile.Close()
 
@@ -118,15 +137,19 @@ func getCurrentBranchName() string {
 	for scanner.Scan() {
 		line := scanner.Text()
 		if strings.HasPrefix(line, "ref: ") {
-			return strings.TrimPrefix(line, "ref: refs/heads/")
+			return strings.TrimPrefix(line, "ref: refs/heads/"), nil
 		}
 	}
 
-	return ""
+	return "", nil
 }
 
 func updateIndex(sha1Str string, filename string) {
-	index := joinPath(getDotDir(), "index")
+	dotDir, err := getDotDir()
+	if err != nil {
+		return
+	}
+	index := joinPath(dotDir, "index")
 	if !fileExists(index) {
 		indexFile, err := os.Create(index)
 		if err != nil {
@@ -143,7 +166,7 @@ func updateIndex(sha1Str string, filename string) {
 		defer indexFile.Close()
 	}
 
-	_, err := ioutil.ReadFile(index)
+	_, err = ioutil.ReadFile(index)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
@@ -155,7 +178,7 @@ func updateIndex(sha1Str string, filename string) {
 
 }
 
-func Add(files []string) {
+func Add(files []string) error {
 	for _, src := range files {
 		if !fileExists(src) {
 			fmt.Printf("file %s not exists.\n", src)
@@ -163,22 +186,29 @@ func Add(files []string) {
 		}
 
 		sha1Str := Sha1Hash("blob", src)
-		dst := joinPath(getObjectsDir(), sha1Str[0:2], sha1Str[2:])
+		dir, err := getObjectsDir()
+		if err != nil {
+			fmt.Println("error in get objects folder.")
+			return err
+		}
+
+		dst := joinPath(dir, sha1Str[0:2], sha1Str[2:])
 		fmt.Println(dst)
 		if fileExists(dst) {
 			// duplicate add
 			continue
 		}
 
-		err := copyFile(src, dst)
+		err = copyFile(src, dst)
 		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
+			fmt.Println("error in copy file.")
+			return err
 		}
 	}
+	return nil
 }
 
-func getDotDir() string {
+func getDotDir() (string, error) {
 	dir, err := os.Getwd()
 	if err != nil {
 		fmt.Println(err)
@@ -187,24 +217,27 @@ func getDotDir() string {
 	for dir != "" {
 		dotDir := joinPath(dir, dotDir)
 		if _, err := os.Stat(dotDir); !os.IsNotExist(err) {
-			return dotDir
+			return dotDir, nil
 		}
 		dir = filepath.Dir(dir)
-		fmt.Println("dir: " + dir)
-		fmt.Println("filepath.Dir(dir)：" + filepath.Dir(dir))
+		// fmt.Println("dir: " + dir)
+		// fmt.Println("filepath.Dir(dir)：" + filepath.Dir(dir))
 		if dir == filepath.Dir(dir) {
-			fmt.Println(".ggit folder not found")
-			os.Exit(1)
+			// fmt.Println(".ggit folder not found")
+			return "", errors.New(".ggit folder not found")
 		}
 	}
-	fmt.Println(".ggit folder not found")
-	os.Exit(1)
-	return ""
+	// fmt.Println(".ggit folder not found")
+	return "", errors.New(".ggit folder not found")
 }
 
-func getObjectsDir() string {
-	dir := getDotDir()
-	return joinPath(dir, "objects")
+func getObjectsDir() (string, error) {
+	dir, err := getDotDir()
+	if err != nil {
+		return "", err
+	}
+
+	return joinPath(dir, "objects"), nil
 }
 
 func fileExists(filename string) bool {

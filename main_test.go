@@ -23,7 +23,10 @@ func TestGetDotDir(t *testing.T) {
 		t.Errorf("Error creating .ggit folder: %v", err)
 	}
 
-	dotDir := getDotDir()
+	dotDir, err := getDotDir()
+	if err != nil {
+		t.Errorf("error in get dor folder")
+	}
 	if dotDir != filepath.Join(tempDir, ".ggit") {
 		t.Errorf("Expected .ggit, got %s", dotDir)
 	}
@@ -46,7 +49,7 @@ func TestGetDotDirFailed(t *testing.T) {
 		t.Fatal("cannot change folder: ", err)
 	}
 
-	_ = getDotDir()
+	_, _ = getDotDir()
 
 	// change back to original folder in order to succeed in deleting temp folder
 	if err := os.Chdir(originalDir); err != nil {
@@ -54,6 +57,7 @@ func TestGetDotDirFailed(t *testing.T) {
 	}
 }
 
+// TODO
 func TestAdd(t *testing.T) {
 	originalDir, err := os.Getwd()
 	if err != nil {
@@ -76,9 +80,6 @@ func TestAdd(t *testing.T) {
 	// dotDir, err := Add("file1")
 	if err != nil {
 		t.Errorf("Error finding .ggit folder: %v", err)
-	}
-	if dotDir != filepath.Join(tempDir, ".ggit") {
-		t.Errorf("Expected .ggit, got %s", dotDir)
 	}
 
 	// change back to original folder in order to succeed in deleting temp folder
