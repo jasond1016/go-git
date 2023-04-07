@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -144,38 +143,58 @@ func getCurrentBranchName() (string, error) {
 	return "", nil
 }
 
-func updateIndex(sha1Str string, filename string) {
+type indexRecord struct {
+	permission string
+	sha1       string
+	fileType   string
+	filename   string
+}
+
+func updateIndex(sha1Str string, filename string) error {
 	dotDir, err := getDotDir()
 	if err != nil {
-		return
+		return err
 	}
 	index := joinPath(dotDir, "index")
+
 	if !fileExists(index) {
 		indexFile, err := os.Create(index)
 		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
+			return err
+		}
+		err = updateIndexFile(indexFile, filename, sha1Str)
+		if err != nil {
+			return err
 		}
 		defer indexFile.Close()
 	} else {
-		indexFile, err := os.Open(index)
+		indexFile, err := os.OpenFile(index, os.O_RDWR, 0644)
 		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
+			return err
+		}
+
+		err = updateIndexFile(indexFile, filename, sha1Str)
+		if err != nil {
+			return err
 		}
 		defer indexFile.Close()
 	}
 
-	_, err = ioutil.ReadFile(index)
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+	return nil
+}
+
+func updateIndexFile(file *os.File, filename string, sha1Str string) error {
+	// 逐行读取文件内容，并更新 SHA-1 编码值
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		idx := indexRecord{permission: fields[0], sha1: fields[1], fileType: fields[2], filename: fields[3]}
+		if idx.filename == filename && idx.sha1 != sha1Str {
+			fmt.Fprintf(file, "%s %s %s %s\n", idx.permission, idx.sha1, idx.fileType, idx.filename)
+			return nil
+		}
 	}
-
-	// read from index file, check if file has been added before
-	// if so, update sha-1
-	// if not, add one
-
+	return nil
 }
 
 func Add(files []string) error {
