@@ -150,50 +150,76 @@ type indexRecord struct {
 	filename   string
 }
 
-func updateIndex(sha1Str string, filename string) error {
-	dotDir, err := getDotDir()
+func (idx indexRecord) String() string {
+	return fmt.Sprintf("%s %s %s %s", idx.permission, idx.sha1, idx.fileType, idx.filename)
+}
+
+func updateIndexFile(filename string, sha1Str string) error {
+	index, err := getIndexFile()
 	if err != nil {
 		return err
 	}
-	index := joinPath(dotDir, "index")
 
+	var indexFile *os.File
 	if !fileExists(index) {
-		indexFile, err := os.Create(index)
+		indexFile, err = os.Create(index)
 		if err != nil {
 			return err
 		}
-		err = updateIndexFile(indexFile, filename, sha1Str)
-		if err != nil {
-			return err
-		}
-		defer indexFile.Close()
 	} else {
-		indexFile, err := os.OpenFile(index, os.O_RDWR, 0644)
+		indexFile, err = os.OpenFile(index, os.O_RDWR, 0644)
 		if err != nil {
 			return err
 		}
-
-		err = updateIndexFile(indexFile, filename, sha1Str)
-		if err != nil {
-			return err
-		}
-		defer indexFile.Close()
 	}
 
-	return nil
-}
+	// 创建一个输出文件
+	tempFileName, err := os.Create("index_bk")
+	if err != nil {
+		fmt.Println("error in create temp file.", err)
+		return err
+	}
+	defer tempFileName.Close()
 
-func updateIndexFile(file *os.File, filename string, sha1Str string) error {
-	// 逐行读取文件内容，并更新 SHA-1 编码值
-	scanner := bufio.NewScanner(file)
+	found := false
+	// 逐行读取并修改文件内容
+	scanner := bufio.NewScanner(indexFile)
 	for scanner.Scan() {
-		fields := strings.Fields(scanner.Text())
+		line := scanner.Text()
+		fields := strings.Fields(line)
 		idx := indexRecord{permission: fields[0], sha1: fields[1], fileType: fields[2], filename: fields[3]}
-		if idx.filename == filename && idx.sha1 != sha1Str {
-			fmt.Fprintf(file, "%s %s %s %s\n", idx.permission, idx.sha1, idx.fileType, idx.filename)
-			return nil
+		if idx.filename == filename {
+			found = true
+			if idx.sha1 != sha1Str {
+				line = idx.String()
+			}
 		}
+		// 将修改后的行写入输出文件
+		fmt.Fprintln(tempFileName, line)
 	}
+
+	if !found {
+		line := indexRecord{permission: "100644", sha1: sha1Str, fileType: "0", filename: filename}.String()
+		fmt.Fprintln(tempFileName, line)
+	}
+
+	err = indexFile.Close()
+	if err != nil {
+		fmt.Println("error in close index file.")
+		return err
+	}
+
+	err = tempFileName.Close()
+	if err != nil {
+		fmt.Println("error in close temp file.")
+		return err
+	}
+
+	err = os.Rename(tempFileName.Name(), indexFile.Name())
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -212,7 +238,6 @@ func Add(files []string) error {
 		}
 
 		dst := joinPath(dir, sha1Str[0:2], sha1Str[2:])
-		fmt.Println(dst)
 		if fileExists(dst) {
 			// duplicate add
 			continue
@@ -221,6 +246,12 @@ func Add(files []string) error {
 		err = copyFile(src, dst)
 		if err != nil {
 			fmt.Println("error in copy file.")
+			return err
+		}
+
+		// err = updateIndex(sha1Str, src)
+		err = updateIndexFile(src, sha1Str)
+		if err != nil {
 			return err
 		}
 	}
@@ -257,6 +288,15 @@ func getObjectsDir() (string, error) {
 	}
 
 	return joinPath(dir, "objects"), nil
+}
+
+func getIndexFile() (string, error) {
+	dir, err := getDotDir()
+	if err != nil {
+		return "", err
+	}
+
+	return joinPath(dir, "index"), nil
 }
 
 func fileExists(filename string) bool {
